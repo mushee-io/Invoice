@@ -12,9 +12,10 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/lib/invoice/*.test.ts",
+    "security:pins": "node scripts/check-dependency-pins.mjs",
     "compact:compile": "compact compile contract/invoice.compact contract/build",
     "compact:assets": "node scripts/prepare-compact-assets.mjs",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run security:pins && npm run typecheck && npm test"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "2.5.1",
