@@ -9,9 +9,9 @@ import { INVOICE_PRIVATE_STATE_ID, createInvoicePrivateStateProvider, type Invoi
 import { assertWalletStillConnected, type ConnectedWallet } from "./wallet";
 
 export type InvoiceCircuitId =
-  | "createInvoice" | "acceptInvoice" | "cancelInvoice" | "fundInvoice" | "payInvoice" | "refundInvoice"
+  | "createInvoice" | "acceptInvoice" | "cancelInvoice" | "fundInvoice" | "payInvoice" | "approveInvoiceRefund" | "refundInvoice"
   | "proveInvoiceExists" | "proveInvoiceAccepted" | "proveInvoicePaid" | "proveAmountAtLeast"
-  | "registerMilestone" | "fundMilestone" | "releaseMilestone" | "refundMilestone"
+  | "registerMilestone" | "fundMilestone" | "releaseMilestone" | "approveMilestoneRefund" | "refundMilestone"
   | "createAmountDisclosure" | "createTaxDisclosure" | "createDueDateDisclosure" | "revokeDisclosure"
   | "createReceipt";
 
