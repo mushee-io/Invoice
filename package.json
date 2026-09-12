@@ -11,7 +11,7 @@
     "build:live": "bash scripts/compile-compact.sh && npm run compact:assets && npm run build:next",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/invoice/state-machine.test.ts",
+    "test": "tsx --test src/lib/invoice/*.test.ts",
     "compact:compile": "compact compile contract/invoice.compact contract/build",
     "compact:assets": "node scripts/prepare-compact-assets.mjs",
     "check": "npm run typecheck && npm test"
