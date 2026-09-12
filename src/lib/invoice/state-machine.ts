@@ -1,10 +1,12 @@
 import type { InvoiceStatus } from "./types";
 
 const ALLOWED: Readonly<Record<InvoiceStatus, readonly InvoiceStatus[]>> = {
-  CREATED: ["ACCEPTED"],
-  ACCEPTED: ["FUNDED"],
-  FUNDED: ["PAID"],
+  CREATED: ["ACCEPTED", "CANCELLED"],
+  ACCEPTED: ["FUNDED", "CANCELLED"],
+  FUNDED: ["PAID", "REFUNDED"],
   PAID: [],
+  CANCELLED: [],
+  REFUNDED: [],
 };
 
 export function canTransitionInvoice(from: InvoiceStatus, to: InvoiceStatus): boolean {
