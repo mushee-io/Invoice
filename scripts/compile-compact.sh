@@ -10,9 +10,9 @@ rm -rf contract/build
 compact compile contract/invoice.compact contract/build
 test -f contract/build/contract/index.js
 for circuit in \
-  createInvoice acceptInvoice cancelInvoice fundInvoice payInvoice refundInvoice \
+  createInvoice acceptInvoice cancelInvoice fundInvoice payInvoice approveInvoiceRefund refundInvoice \
   proveInvoiceExists proveInvoiceAccepted proveInvoicePaid proveAmountAtLeast \
-  registerMilestone fundMilestone releaseMilestone refundMilestone \
+  registerMilestone fundMilestone releaseMilestone approveMilestoneRefund refundMilestone \
   createAmountDisclosure createTaxDisclosure createDueDateDisclosure revokeDisclosure \
   createReceipt
 do
