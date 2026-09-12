@@ -1,24 +1,103 @@
 import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import { invoiceWitnesses } from "./private-state";
 
-export type InvoiceLedgerEntry = { commitment: Uint8Array; tokenColor: Uint8Array; status: number; acceptanceNullifier: Uint8Array; paymentNullifier: Uint8Array };
-export type InvoiceLedgerView = { protocolVersion: bigint; invoices: { member(key: Uint8Array): boolean; lookup(key: Uint8Array): InvoiceLedgerEntry }; usedNullifiers: { member(key: Uint8Array): boolean } };
+export type InvoiceLedgerEntry = {
+  commitment: Uint8Array;
+  tokenColor: Uint8Array;
+  status: number;
+  acceptanceNullifier: Uint8Array;
+  paymentNullifier: Uint8Array;
+  cancellationNullifier: Uint8Array;
+  refundNullifier: Uint8Array;
+};
+
+export type ReceivableProofEntry = {
+  invoiceId: Uint8Array;
+  invoiceCommitment: Uint8Array;
+  claimCode: bigint;
+  thresholdMinor: bigint;
+};
+
+export type MilestoneLedgerEntry = {
+  invoiceId: Uint8Array;
+  index: bigint;
+  commitment: Uint8Array;
+  tokenColor: Uint8Array;
+  status: number;
+  releaseNullifier: Uint8Array;
+  refundNullifier: Uint8Array;
+};
+
+export type DisclosureLedgerEntry = {
+  invoiceId: Uint8Array;
+  invoiceCommitment: Uint8Array;
+  verifierId: Uint8Array;
+  fieldCode: bigint;
+  fieldCommitment: Uint8Array;
+  expiresAt: bigint;
+  revoked: boolean;
+};
+
+export type ReceiptLedgerEntry = {
+  invoiceId: Uint8Array;
+  invoiceCommitment: Uint8Array;
+  paymentNullifier: Uint8Array;
+  verifierId: Uint8Array;
+};
+
+type LedgerMap<T> = { member(key: Uint8Array): boolean; lookup(key: Uint8Array): T };
+
+export type InvoiceLedgerView = {
+  protocolVersion: bigint;
+  invoices: LedgerMap<InvoiceLedgerEntry>;
+  usedNullifiers: { member(key: Uint8Array): boolean };
+  receivableProofs: LedgerMap<ReceivableProofEntry>;
+  milestones: LedgerMap<MilestoneLedgerEntry>;
+  disclosures: LedgerMap<DisclosureLedgerEntry>;
+  receipts: LedgerMap<ReceiptLedgerEntry>;
+};
+
 export type GeneratedInvoiceModule = {
   Contract: new (...args: unknown[]) => unknown;
   ledger(state: unknown): InvoiceLedgerView;
   pureCircuits: {
     deriveAuthorityPublicKey(secret: Uint8Array): Uint8Array;
-    invoiceCommitment(invoiceId: Uint8Array, amountMinor: bigint, taxMinor: bigint, payerPublicKey: Uint8Array, supplierPublicKey: Uint8Array, supplierCoinPublicKey: Uint8Array, dueAt: bigint, salt: Uint8Array): Uint8Array;
+    invoiceCommitment(
+      invoiceId: Uint8Array,
+      amountMinor: bigint,
+      taxMinor: bigint,
+      payerPublicKey: Uint8Array,
+      supplierPublicKey: Uint8Array,
+      payerCoinPublicKey: Uint8Array,
+      supplierCoinPublicKey: Uint8Array,
+      dueAt: bigint,
+      salt: Uint8Array,
+    ): Uint8Array;
+    milestoneId(invoiceId: Uint8Array, index: bigint): Uint8Array;
+    milestoneCommitment(invoiceId: Uint8Array, index: bigint, amountMinor: bigint, salt: Uint8Array): Uint8Array;
+    amountDisclosureCommitment(amountMinor: bigint, opening: Uint8Array): Uint8Array;
+    taxDisclosureCommitment(taxMinor: bigint, opening: Uint8Array): Uint8Array;
+    dueDateDisclosureCommitment(dueAt: bigint, opening: Uint8Array): Uint8Array;
   };
-  InvoiceStatus: { Created: number; Accepted: number; Funded: number; Paid: number };
+  InvoiceStatus: { Created: number; Accepted: number; Funded: number; Paid: number; Cancelled: number; Refunded: number };
+  MilestoneStatus: { Registered: number; Funded: number; Released: number; Refunded: number };
 };
 
 function validate(value: unknown): GeneratedInvoiceModule {
   if (!value || typeof value !== "object") throw new Error("Generated Blackout Invoice module did not load");
   const module = value as Partial<GeneratedInvoiceModule>;
   if (typeof module.Contract !== "function" || typeof module.ledger !== "function") throw new Error("Generated contract exports are missing");
-  if (!module.pureCircuits || typeof module.pureCircuits.deriveAuthorityPublicKey !== "function" || typeof module.pureCircuits.invoiceCommitment !== "function") throw new Error("Generated invoice pure circuits are missing");
-  if (!module.InvoiceStatus) throw new Error("Generated InvoiceStatus enum is missing");
+  if (!module.pureCircuits ||
+      typeof module.pureCircuits.deriveAuthorityPublicKey !== "function" ||
+      typeof module.pureCircuits.invoiceCommitment !== "function" ||
+      typeof module.pureCircuits.milestoneId !== "function" ||
+      typeof module.pureCircuits.milestoneCommitment !== "function" ||
+      typeof module.pureCircuits.amountDisclosureCommitment !== "function" ||
+      typeof module.pureCircuits.taxDisclosureCommitment !== "function" ||
+      typeof module.pureCircuits.dueDateDisclosureCommitment !== "function") {
+    throw new Error("Generated invoice protocol v2 pure circuits are missing");
+  }
+  if (!module.InvoiceStatus || !module.MilestoneStatus) throw new Error("Generated protocol v2 status enums are missing");
   return module as GeneratedInvoiceModule;
 }
 
