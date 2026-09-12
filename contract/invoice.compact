@@ -46,7 +46,7 @@ export pure circuit invoiceCommitment(
     return persistentHash<Vector<9, Bytes<32>>>([
         pad(32, "blackout:invoice:v1"), invoiceId,
         persistentHash<Uint<64>>(amountMinor), persistentHash<Uint<64>>(taxMinor),
-        payerPublicKey, supplierPublicKey, supplierCoinPublicKey,
+        payerPublicKey as Bytes<32>, supplierPublicKey as Bytes<32>, supplierCoinPublicKey,
         persistentHash<Uint<64>>(dueAt), salt
     ]);
 }
