@@ -8,6 +8,7 @@ export type InvoiceLedgerEntry = {
   acceptanceNullifier: Uint8Array;
   paymentNullifier: Uint8Array;
   cancellationNullifier: Uint8Array;
+  refundApprovalNullifier: Uint8Array;
   refundNullifier: Uint8Array;
 };
 
@@ -25,6 +26,7 @@ export type MilestoneLedgerEntry = {
   tokenColor: Uint8Array;
   status: number;
   releaseNullifier: Uint8Array;
+  refundApprovalNullifier: Uint8Array;
   refundNullifier: Uint8Array;
 };
 
