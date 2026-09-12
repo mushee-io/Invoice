@@ -6,6 +6,8 @@ import { bytesToHex, randomBytes32 } from "@/lib/midnight/bytes";
 import { connectMidnightWallet, type ConnectedWallet } from "@/lib/midnight/wallet";
 import {
   acceptInvoiceOnChain,
+  approveInvoiceRefundOnChain,
+  approveMilestoneRefundOnChain,
   cancelInvoiceOnChain,
   createAuthority,
   createInvoiceOnChain,
@@ -53,6 +55,7 @@ export default function InvoiceWorkbench() {
   const [supplierCoin, setSupplierCoin] = useState("");
   const [salt, setSalt] = useState("");
   const [status, setStatus] = useState("NOT CREATED");
+  const [refundApproved, setRefundApproved] = useState(false);
 
   const [proofThreshold, setProofThreshold] = useState("50000");
   const [proofId, setProofId] = useState("");
@@ -61,6 +64,7 @@ export default function InvoiceWorkbench() {
   const [milestoneAmount, setMilestoneAmount] = useState("25000");
   const [milestoneSalt, setMilestoneSalt] = useState("");
   const [milestoneStatus, setMilestoneStatus] = useState("NOT REGISTERED");
+  const [milestoneRefundApproved, setMilestoneRefundApproved] = useState(false);
 
   const [verifierId, setVerifierId] = useState("");
   const [disclosureField, setDisclosureField] = useState<DisclosureField>("AMOUNT");
@@ -172,30 +176,31 @@ export default function InvoiceWorkbench() {
         <h3>04 / WHOLE-INVOICE ESCROW <b>{status}</b></h3>
         <div className="flow">
           <button disabled={!ready || busy} onClick={() => act(async () => {
-            const result = await createInvoiceOnChain({ ...draft, supplierSecretHex: supplierSecret }); setStatus("CREATED"); log(`Invoice committed / ${result.transactionId}`);
+            const result = await createInvoiceOnChain({ ...draft, supplierSecretHex: supplierSecret }); setStatus("CREATED"); setRefundApproved(false); log(`Invoice committed / ${result.transactionId}`);
           })}>CREATE</button>
-          <i>→</i>
           <button disabled={!ready || busy} onClick={() => act(async () => {
             const result = await acceptInvoiceOnChain({ ...draft, payerSecretHex: payerSecret }); setStatus("ACCEPTED"); log(`Accepted / ${result.transactionId}`);
           })}>ACCEPT</button>
-          <i>→</i>
           <button disabled={!ready || busy} onClick={() => act(async () => {
             const result = await fundInvoiceOnChain({ invoiceIdHex: invoiceId, payerSecretHex: payerSecret }); setStatus("FUNDED"); log(`FUNDS SECURED / ${result.transactionId}`);
           })}>FUND ESCROW</button>
-          <i>→</i>
           <button disabled={!ready || busy} onClick={() => act(async () => {
             const result = await payInvoiceOnChain({ invoiceIdHex: invoiceId, payerSecretHex: payerSecret }); setStatus("PAID"); log(`REAL settlement confirmed / ${result.transactionId}`);
-          })}>RELEASE</button>
+          })}>RELEASE TO SUPPLIER</button>
           <button disabled={!ready || busy} onClick={() => act(async () => {
             const result = await cancelInvoiceOnChain({ invoiceIdHex: invoiceId, supplierSecretHex: supplierSecret }); setStatus("CANCELLED"); log(`Unfunded invoice cancelled / ${result.transactionId}`);
           })}>CANCEL UNFUNDED</button>
           <button disabled={!ready || busy} onClick={() => act(async () => {
-            const result = await refundInvoiceOnChain({ invoiceIdHex: invoiceId, payerSecretHex: payerSecret, supplierSecretHex: supplierSecret }); setStatus("REFUNDED"); log(`Mutual escrow refund / ${result.transactionId}`);
-          })}>MUTUAL REFUND</button>
+            const result = await approveInvoiceRefundOnChain({ invoiceIdHex: invoiceId, supplierSecretHex: supplierSecret }); setRefundApproved(true); log(`Supplier approved refund / ${result.approvalNullifierHex}`);
+          })}>SUPPLIER APPROVE REFUND</button>
+          <button disabled={!ready || busy || !refundApproved} onClick={() => act(async () => {
+            const result = await refundInvoiceOnChain({ invoiceIdHex: invoiceId, payerSecretHex: payerSecret }); setStatus("REFUNDED"); log(`Payer executed shielded refund / ${result.transactionId}`);
+          })}>PAYER EXECUTE REFUND</button>
           <button disabled={!ready || busy || !invoiceId} onClick={() => act(async () => {
             const current = await getInvoiceStatus(invoiceId); setStatus(current); log(`Indexer invoice state / ${current}`);
           })}>REFRESH LEDGER</button>
         </div>
+        <p className="privacy">Refund is two-party and secret-safe: supplier posts a ZK approval nullifier; payer executes the refund with a separate proof. Neither party imports the other party&apos;s secret.</p>
       </section>
 
       <section className="panel wide">
@@ -219,15 +224,14 @@ export default function InvoiceWorkbench() {
           <button onClick={() => setMilestoneSalt(bytesToHex(randomBytes32()))}>RANDOM MILESTONE SALT</button>
         </div>
         <div className="flow">
-          <button disabled={!ready || busy} onClick={() => act(async () => { const result = await registerMilestoneOnChain({ ...milestoneDraft, supplierSecretHex: supplierSecret }); setMilestoneStatus("REGISTERED"); log(`Milestone registered / ${result.milestoneIdHex}`); })}>REGISTER</button>
-          <i>→</i>
+          <button disabled={!ready || busy} onClick={() => act(async () => { const result = await registerMilestoneOnChain({ ...milestoneDraft, supplierSecretHex: supplierSecret }); setMilestoneStatus("REGISTERED"); setMilestoneRefundApproved(false); log(`Milestone registered / ${result.milestoneIdHex}`); })}>REGISTER</button>
           <button disabled={!ready || busy} onClick={() => act(async () => { const result = await fundMilestoneOnChain({ invoiceIdHex: invoiceId, index: Number(milestoneIndex), payerSecretHex: payerSecret }); setMilestoneStatus("FUNDED"); log(`Milestone funds secured / ${result.transactionId}`); })}>FUND TRANCHE</button>
-          <i>→</i>
           <button disabled={!ready || busy} onClick={() => act(async () => { const result = await releaseMilestoneOnChain({ invoiceIdHex: invoiceId, index: Number(milestoneIndex), payerSecretHex: payerSecret }); setMilestoneStatus("RELEASED"); log(`Milestone released / ${result.transactionId}`); })}>RELEASE</button>
-          <button disabled={!ready || busy} onClick={() => act(async () => { const result = await refundMilestoneOnChain({ invoiceIdHex: invoiceId, index: Number(milestoneIndex), payerSecretHex: payerSecret, supplierSecretHex: supplierSecret }); setMilestoneStatus("REFUNDED"); log(`Milestone mutually refunded / ${result.transactionId}`); })}>MUTUAL REFUND</button>
+          <button disabled={!ready || busy} onClick={() => act(async () => { const result = await approveMilestoneRefundOnChain({ invoiceIdHex: invoiceId, index: Number(milestoneIndex), supplierSecretHex: supplierSecret }); setMilestoneRefundApproved(true); log(`Supplier approved milestone refund / ${result.approvalNullifierHex}`); })}>SUPPLIER APPROVE REFUND</button>
+          <button disabled={!ready || busy || !milestoneRefundApproved} onClick={() => act(async () => { const result = await refundMilestoneOnChain({ invoiceIdHex: invoiceId, index: Number(milestoneIndex), payerSecretHex: payerSecret }); setMilestoneStatus("REFUNDED"); log(`Payer executed milestone refund / ${result.transactionId}`); })}>PAYER EXECUTE REFUND</button>
           <button disabled={!ready || busy} onClick={() => act(async () => { const current = await getMilestoneStatus(invoiceId, Number(milestoneIndex)); setMilestoneStatus(current); log(`Indexer milestone state / ${current}`); })}>REFRESH</button>
         </div>
-        <p className="privacy">Each tranche is a separate contract-held shielded coin. No public running escrow balance is published.</p>
+        <p className="privacy">Each tranche is a separate contract-held shielded coin with independent release and refund-approval nullifiers.</p>
       </section>
 
       <section className="panel wide">
