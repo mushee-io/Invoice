@@ -1,6 +1,6 @@
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import type { PrivateStateProvider } from "@midnight-ntwrk/midnight-js-types";
-import { assertInvoiceWitness, assertMilestoneDraft, type PrivateInvoiceWitness, type PrivateMilestoneWitness } from "../invoice/types";
+import { assertInvoiceWitness, assertMilestoneDraft, assertNonZeroBytes32, type PrivateInvoiceWitness, type PrivateMilestoneWitness } from "../invoice/types";
 import { bytesToHex, hexToBytes32 } from "./bytes";
 
 export const INVOICE_PRIVATE_STATE_ID = "blackoutInvoicePrivateState" as const;
@@ -90,6 +90,7 @@ export function upsertMilestoneRecord(state: InvoicePrivateState, invoiceIdHex: 
 }
 
 export function setInvoiceAuthority(state: InvoicePrivateState, invoiceIdHex: string, role: "payer" | "supplier", secretHex: string): InvoicePrivateState {
+  assertNonZeroBytes32(secretHex, `${role} secret`);
   const id = key(invoiceIdHex), secret = hexToBytes32(secretHex, `${role} secret`);
   return role === "payer"
     ? { ...state, payerSecrets: { ...state.payerSecrets, [id]: secret }, activeInvoiceId: id, activeAuthority: role }
@@ -97,12 +98,50 @@ export function setInvoiceAuthority(state: InvoicePrivateState, invoiceIdHex: st
 }
 
 export function setBothInvoiceAuthorities(state: InvoicePrivateState, invoiceIdHex: string, payerSecretHex: string, supplierSecretHex: string): InvoicePrivateState {
+  assertNonZeroBytes32(payerSecretHex, "payer secret");
+  assertNonZeroBytes32(supplierSecretHex, "supplier secret");
   const id = key(invoiceIdHex);
   return {
     ...state,
     payerSecrets: { ...state.payerSecrets, [id]: hexToBytes32(payerSecretHex, "payer secret") },
     supplierSecrets: { ...state.supplierSecrets, [id]: hexToBytes32(supplierSecretHex, "supplier secret") },
     activeInvoiceId: id,
+  };
+}
+
+export function clearInvoiceAuthorities(state: InvoicePrivateState, invoiceIdHex: string): InvoicePrivateState {
+  const id = key(invoiceIdHex);
+  const payerSecrets = { ...state.payerSecrets };
+  const supplierSecrets = { ...state.supplierSecrets };
+  delete payerSecrets[id];
+  delete supplierSecrets[id];
+  return {
+    ...state,
+    payerSecrets,
+    supplierSecrets,
+    activeAuthority: state.activeInvoiceId === id ? undefined : state.activeAuthority,
+  };
+}
+
+export function clearConsumedInvoiceCoin(state: InvoicePrivateState, invoiceIdHex: string): InvoicePrivateState {
+  const id = key(invoiceIdHex);
+  const fundedCoins = { ...state.fundedCoins };
+  delete fundedCoins[id];
+  return {
+    ...state,
+    fundedCoins,
+    activeFundedInvoiceId: state.activeFundedInvoiceId === id ? undefined : state.activeFundedInvoiceId,
+  };
+}
+
+export function clearConsumedMilestoneCoin(state: InvoicePrivateState, invoiceIdHex: string, index: number): InvoicePrivateState {
+  const id = milestoneKey(invoiceIdHex, index);
+  const fundedMilestoneCoins = { ...state.fundedMilestoneCoins };
+  delete fundedMilestoneCoins[id];
+  return {
+    ...state,
+    fundedMilestoneCoins,
+    activeFundedMilestoneKey: state.activeFundedMilestoneKey === id ? undefined : state.activeFundedMilestoneKey,
   };
 }
 
