@@ -99,12 +99,11 @@ export circuit acceptInvoice(invoiceId: Bytes<32>, nonce: Bytes<32>): Bytes<32> 
     const [entry, record] = verifiedInvoice(invoiceId);
     assert(entry.status == InvoiceStatus.Created, "Only a created invoice may be accepted");
     const payerSecret = assertPayer(record);
-    const nullifier = acceptanceNullifier(invoiceId, entry.commitment, payerSecret, nonce);
-    const key = disclose(nullifier);
-    assert(!usedNullifiers.member(key), "Acceptance nullifier already used");
-    usedNullifiers.insert(key, true);
-    invoices.insert(disclose(invoiceId), disclose(InvoiceEntry { commitment: entry.commitment, tokenColor: entry.tokenColor, status: InvoiceStatus.Accepted, acceptanceNullifier: nullifier, paymentNullifier: entry.paymentNullifier }));
-    return nullifier;
+    const publicNullifier = disclose(acceptanceNullifier(invoiceId, entry.commitment, payerSecret, nonce));
+    assert(!usedNullifiers.member(publicNullifier), "Acceptance nullifier already used");
+    usedNullifiers.insert(publicNullifier, true);
+    invoices.insert(disclose(invoiceId), disclose(InvoiceEntry { commitment: entry.commitment, tokenColor: entry.tokenColor, status: InvoiceStatus.Accepted, acceptanceNullifier: publicNullifier, paymentNullifier: entry.paymentNullifier }));
+    return publicNullifier;
 }
 
 export circuit fundInvoice(invoiceId: Bytes<32>, fundingCoin: ShieldedCoinInfo): [] {
@@ -121,14 +120,13 @@ export circuit payInvoice(invoiceId: Bytes<32>, nonce: Bytes<32>): ShieldedCoinI
     const [entry, record] = verifiedInvoice(invoiceId);
     assert(entry.status == InvoiceStatus.Funded, "Invoice must be funded before payment");
     const payerSecret = assertPayer(record);
-    const nullifier = paymentNullifier(invoiceId, entry.commitment, payerSecret, nonce);
-    const key = disclose(nullifier);
-    assert(!usedNullifiers.member(key), "Payment nullifier already used");
+    const publicNullifier = disclose(paymentNullifier(invoiceId, entry.commitment, payerSecret, nonce));
+    assert(!usedNullifiers.member(publicNullifier), "Payment nullifier already used");
     const fundedCoin = getFundedCoin();
     assert(fundedCoin.color == entry.tokenColor, "Funded coin token does not match invoice token");
     assert(fundedCoin.value == record.amountMinor as Uint<128>, "Funded coin value does not match private invoice amount");
     const sent = sendShielded(disclose(fundedCoin), left<ZswapCoinPublicKey, ContractAddress>(ZswapCoinPublicKey { bytes: disclose(record.supplierCoinPublicKey) }), disclose(record.amountMinor) as Uint<128>);
-    usedNullifiers.insert(key, true);
-    invoices.insert(disclose(invoiceId), disclose(InvoiceEntry { commitment: entry.commitment, tokenColor: entry.tokenColor, status: InvoiceStatus.Paid, acceptanceNullifier: entry.acceptanceNullifier, paymentNullifier: nullifier }));
+    usedNullifiers.insert(publicNullifier, true);
+    invoices.insert(disclose(invoiceId), disclose(InvoiceEntry { commitment: entry.commitment, tokenColor: entry.tokenColor, status: InvoiceStatus.Paid, acceptanceNullifier: entry.acceptanceNullifier, paymentNullifier: publicNullifier }));
     return sent.sent;
 }
