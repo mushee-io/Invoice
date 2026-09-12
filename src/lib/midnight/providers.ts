@@ -8,7 +8,13 @@ import { transactionBytesToHex, transactionHexToBytes } from "./bytes";
 import { INVOICE_PRIVATE_STATE_ID, createInvoicePrivateStateProvider, type InvoicePrivateState } from "./private-state";
 import { assertWalletStillConnected, type ConnectedWallet } from "./wallet";
 
-export type InvoiceCircuitId = "createInvoice" | "acceptInvoice" | "fundInvoice" | "payInvoice";
+export type InvoiceCircuitId =
+  | "createInvoice" | "acceptInvoice" | "cancelInvoice" | "fundInvoice" | "payInvoice" | "refundInvoice"
+  | "proveInvoiceExists" | "proveInvoiceAccepted" | "proveInvoicePaid" | "proveAmountAtLeast"
+  | "registerMilestone" | "fundMilestone" | "releaseMilestone" | "refundMilestone"
+  | "createAmountDisclosure" | "createTaxDisclosure" | "createDueDateDisclosure" | "revokeDisclosure"
+  | "createReceipt";
+
 export type InvoiceProviders = MidnightProviders<InvoiceCircuitId, typeof INVOICE_PRIVATE_STATE_ID, InvoicePrivateState>;
 
 export async function buildInvoiceProviders(wallet: ConnectedWallet, password: string): Promise<InvoiceProviders> {
