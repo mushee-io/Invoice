@@ -18,7 +18,6 @@ import {
   fundedMilestoneCoinCandidates,
   getInvoiceRecord,
   getMilestoneRecord,
-  setBothInvoiceAuthorities,
   setInvoiceAuthority,
   upsertInvoiceRecord,
   upsertMilestoneRecord,
@@ -42,6 +41,10 @@ function equalBytes(a: Uint8Array, b: Uint8Array) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
+}
+
+function nonZeroBytes(value: Uint8Array) {
+  return value.some((byte) => byte !== 0);
 }
 
 function requireRuntime() {
@@ -75,7 +78,7 @@ async function queryLedger(current: Runtime): Promise<InvoiceLedgerView | null> 
 
 async function confirm(current: Runtime, description: string, predicate: (value: InvoiceLedgerView) => boolean): Promise<InvoiceLedgerView> {
   let latest: InvoiceLedgerView | null = null;
-  for (let attempt = 0; attempt < 24; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
     latest = await queryLedger(current);
     if (latest && BigInt(latest.protocolVersion) === 2n && predicate(latest)) return latest;
     await new Promise((resolve) => window.setTimeout(resolve, 500));
@@ -238,34 +241,38 @@ export async function fundInvoiceOnChain(input: { invoiceIdHex: string; payerSec
   return { transactionId: result.public.txId, candidateMtIndices: candidates.map(String) };
 }
 
-async function spendWholeInvoiceEscrow(input: {
-  invoiceIdHex: string;
-  payerSecretHex: string;
-  supplierSecretHex?: string;
-  mode: "pay" | "refund";
-}) {
+export async function approveInvoiceRefundOnChain(input: { invoiceIdHex: string; supplierSecretHex: string }) {
   const current = requireRuntime();
   const invoiceId = hexToBytes32(input.invoiceIdHex);
   let state = activateInvoice(await getPrivateState(current), input.invoiceIdHex);
-  state = input.mode === "refund"
-    ? setBothInvoiceAuthorities(state, input.invoiceIdHex, input.payerSecretHex, input.supplierSecretHex ?? "")
-    : setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
+  state = setInvoiceAuthority(state, input.invoiceIdHex, "supplier", input.supplierSecretHex);
+  await setPrivateState(current, state);
+  const result = await submit(current, "approveInvoiceRefund", [invoiceId, randomBytes32()]);
+  const ledger = await confirm(current, "supplier refund approval", (value) => value.invoices.member(invoiceId) && nonZeroBytes(value.invoices.lookup(invoiceId).refundApprovalNullifier));
+  return { transactionId: result.public.txId, approvalNullifierHex: bytesToHex(ledger.invoices.lookup(invoiceId).refundApprovalNullifier) };
+}
+
+async function spendWholeInvoiceEscrow(input: { invoiceIdHex: string; payerSecretHex: string; mode: "pay" | "refund" }) {
+  const current = requireRuntime();
+  const invoiceId = hexToBytes32(input.invoiceIdHex);
+  let state = activateInvoice(await getPrivateState(current), input.invoiceIdHex);
+  state = setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
   await setPrivateState(current, state);
   const candidates = fundedCoinCandidates(state, input.invoiceIdHex);
   if (!candidates.length) throw new Error("Funded invoice coin is unavailable");
+
   const before = await confirm(current, `${input.mode} precheck`, (value) => value.invoices.member(invoiceId));
-  const status = before.invoices.lookup(invoiceId).status;
-  if (status === current.generated.InvoiceStatus.Paid || status === current.generated.InvoiceStatus.Refunded) throw new Error("Invoice escrow has already been consumed");
-  if (status !== current.generated.InvoiceStatus.Funded) throw new Error("Invoice is not FUNDED");
+  const entry = before.invoices.lookup(invoiceId);
+  if (entry.status === current.generated.InvoiceStatus.Paid || entry.status === current.generated.InvoiceStatus.Refunded) throw new Error("Invoice escrow has already been consumed");
+  if (entry.status !== current.generated.InvoiceStatus.Funded) throw new Error("Invoice is not FUNDED");
+  if (input.mode === "refund" && !nonZeroBytes(entry.refundApprovalNullifier)) throw new Error("Supplier refund approval has not been recorded on-chain");
+
   const nonce = randomBytes32();
   let lastError: Error | undefined;
-
   for (const candidate of candidates) {
     try {
       state = activateFundedCoin(await getPrivateState(current), input.invoiceIdHex, candidate);
-      state = input.mode === "refund"
-        ? setBothInvoiceAuthorities(state, input.invoiceIdHex, input.payerSecretHex, input.supplierSecretHex ?? "")
-        : setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
+      state = setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
       await setPrivateState(current, state);
       const result = await submit(current, input.mode === "refund" ? "refundInvoice" : "payInvoice", [invoiceId, nonce]);
       const target = input.mode === "refund" ? current.generated.InvoiceStatus.Refunded : current.generated.InvoiceStatus.Paid;
@@ -287,8 +294,7 @@ export async function payInvoiceOnChain(input: { invoiceIdHex: string; payerSecr
   return spendWholeInvoiceEscrow({ ...input, mode: "pay" });
 }
 
-export async function refundInvoiceOnChain(input: { invoiceIdHex: string; payerSecretHex: string; supplierSecretHex: string }) {
-  if (!input.supplierSecretHex) throw new Error("Supplier approval is required for a funded escrow refund");
+export async function refundInvoiceOnChain(input: { invoiceIdHex: string; payerSecretHex: string }) {
   return spendWholeInvoiceEscrow({ ...input, mode: "refund" });
 }
 
@@ -374,37 +380,40 @@ export async function fundMilestoneOnChain(input: { invoiceIdHex: string; index:
   return { transactionId: result.public.txId, candidateMtIndices: candidates.map(String) };
 }
 
-async function spendMilestoneEscrow(input: {
-  invoiceIdHex: string;
-  index: number;
-  payerSecretHex: string;
-  supplierSecretHex?: string;
-  mode: "release" | "refund";
-}) {
+export async function approveMilestoneRefundOnChain(input: { invoiceIdHex: string; index: number; supplierSecretHex: string }) {
   const current = requireRuntime();
   const invoiceId = hexToBytes32(input.invoiceIdHex);
   let state = activateMilestone(activateInvoice(await getPrivateState(current), input.invoiceIdHex), input.invoiceIdHex, input.index);
-  state = input.mode === "refund"
-    ? setBothInvoiceAuthorities(state, input.invoiceIdHex, input.payerSecretHex, input.supplierSecretHex ?? "")
-    : setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
+  state = setInvoiceAuthority(state, input.invoiceIdHex, "supplier", input.supplierSecretHex);
+  await setPrivateState(current, state);
+  const milestoneId = current.generated.pureCircuits.milestoneId(invoiceId, BigInt(input.index));
+  const result = await submit(current, "approveMilestoneRefund", [invoiceId, BigInt(input.index), randomBytes32()]);
+  const ledger = await confirm(current, "supplier milestone refund approval", (value) => value.milestones.member(milestoneId) && nonZeroBytes(value.milestones.lookup(milestoneId).refundApprovalNullifier));
+  return { transactionId: result.public.txId, milestoneIdHex: bytesToHex(milestoneId), approvalNullifierHex: bytesToHex(ledger.milestones.lookup(milestoneId).refundApprovalNullifier) };
+}
+
+async function spendMilestoneEscrow(input: { invoiceIdHex: string; index: number; payerSecretHex: string; mode: "release" | "refund" }) {
+  const current = requireRuntime();
+  const invoiceId = hexToBytes32(input.invoiceIdHex);
+  let state = activateMilestone(activateInvoice(await getPrivateState(current), input.invoiceIdHex), input.invoiceIdHex, input.index);
+  state = setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
   await setPrivateState(current, state);
   const candidates = fundedMilestoneCoinCandidates(state, input.invoiceIdHex, input.index);
   if (!candidates.length) throw new Error("Funded milestone coin is unavailable");
   const milestoneId = current.generated.pureCircuits.milestoneId(invoiceId, BigInt(input.index));
   const before = await confirm(current, "milestone escrow spend precheck", (value) => value.milestones.member(milestoneId));
-  const currentStatus = before.milestones.lookup(milestoneId).status;
-  if (currentStatus === current.generated.MilestoneStatus.Released || currentStatus === current.generated.MilestoneStatus.Refunded) throw new Error("Milestone escrow has already been consumed");
-  if (currentStatus !== current.generated.MilestoneStatus.Funded) throw new Error("Milestone is not FUNDED");
+  const milestone = before.milestones.lookup(milestoneId);
+  if (milestone.status === current.generated.MilestoneStatus.Released || milestone.status === current.generated.MilestoneStatus.Refunded) throw new Error("Milestone escrow has already been consumed");
+  if (milestone.status !== current.generated.MilestoneStatus.Funded) throw new Error("Milestone is not FUNDED");
+  if (input.mode === "refund" && !nonZeroBytes(milestone.refundApprovalNullifier)) throw new Error("Supplier milestone refund approval has not been recorded on-chain");
+
   const nonce = randomBytes32();
   let lastError: Error | undefined;
-
   for (const candidate of candidates) {
     try {
       state = activateFundedMilestoneCoin(await getPrivateState(current), input.invoiceIdHex, input.index, candidate);
       state = activateMilestone(state, input.invoiceIdHex, input.index);
-      state = input.mode === "refund"
-        ? setBothInvoiceAuthorities(state, input.invoiceIdHex, input.payerSecretHex, input.supplierSecretHex ?? "")
-        : setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
+      state = setInvoiceAuthority(state, input.invoiceIdHex, "payer", input.payerSecretHex);
       await setPrivateState(current, state);
       const result = await submit(current, input.mode === "refund" ? "refundMilestone" : "releaseMilestone", [invoiceId, BigInt(input.index), nonce]);
       const target = input.mode === "refund" ? current.generated.MilestoneStatus.Refunded : current.generated.MilestoneStatus.Released;
@@ -424,8 +433,7 @@ export async function releaseMilestoneOnChain(input: { invoiceIdHex: string; ind
   return spendMilestoneEscrow({ ...input, mode: "release" });
 }
 
-export async function refundMilestoneOnChain(input: { invoiceIdHex: string; index: number; payerSecretHex: string; supplierSecretHex: string }) {
-  if (!input.supplierSecretHex) throw new Error("Supplier approval is required for milestone refund");
+export async function refundMilestoneOnChain(input: { invoiceIdHex: string; index: number; payerSecretHex: string }) {
   return spendMilestoneEscrow({ ...input, mode: "refund" });
 }
 
@@ -488,10 +496,11 @@ export async function verifyDisclosureArtifactOnChain(artifact: DisclosureArtifa
       ? current.generated.pureCircuits.taxDisclosureCommitment(artifact.valueMinor, opening)
       : current.generated.pureCircuits.dueDateDisclosureCommitment(artifact.valueMinor, opening);
   const fieldCode = artifact.field === "AMOUNT" ? 1n : artifact.field === "TAX" ? 2n : 3n;
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
   const valid = !stored.revoked && stored.fieldCode === fieldCode && stored.expiresAt === artifact.expiresAt &&
     equalBytes(stored.invoiceId, hexToBytes32(artifact.invoiceIdHex)) && equalBytes(stored.verifierId, hexToBytes32(artifact.verifierIdHex)) &&
-    equalBytes(stored.fieldCommitment, expected) && bytesToHex(expected) === artifact.fieldCommitmentHex.toLowerCase() && artifact.expiresAt > BigInt(Math.floor(Date.now() / 1000));
-  return { valid, revoked: stored.revoked, expiredLocally: artifact.expiresAt <= BigInt(Math.floor(Date.now() / 1000)), invoiceCommitmentHex: bytesToHex(stored.invoiceCommitment) };
+    equalBytes(stored.fieldCommitment, expected) && bytesToHex(expected) === artifact.fieldCommitmentHex.toLowerCase() && artifact.expiresAt > nowSeconds;
+  return { valid, revoked: stored.revoked, expiredLocally: artifact.expiresAt <= nowSeconds, invoiceCommitmentHex: bytesToHex(stored.invoiceCommitment) };
 }
 
 export async function revokeDisclosureOnChain(input: { invoiceIdHex: string; disclosureIdHex: string; supplierSecretHex: string }) {
