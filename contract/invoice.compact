@@ -29,6 +29,7 @@ export struct InvoiceEntry {
     acceptanceNullifier: Bytes<32>;
     paymentNullifier: Bytes<32>;
     cancellationNullifier: Bytes<32>;
+    refundApprovalNullifier: Bytes<32>;
     refundNullifier: Bytes<32>;
 }
 
@@ -46,6 +47,7 @@ export struct MilestoneEntry {
     tokenColor: Bytes<32>;
     status: MilestoneStatus;
     releaseNullifier: Bytes<32>;
+    refundApprovalNullifier: Bytes<32>;
     refundNullifier: Bytes<32>;
 }
 
@@ -112,8 +114,12 @@ export pure circuit cancellationNullifier(invoiceId: Bytes<32>, commitment: Byte
     return persistentHash<Vector<5, Bytes<32>>>([pad(32, "blackout:cancel:v1"), invoiceId, commitment, persistentHash<AuthoritySecret>(supplierSecret), nonce]);
 }
 
-export pure circuit refundNullifier(invoiceId: Bytes<32>, commitment: Bytes<32>, payerSecret: AuthoritySecret, supplierSecret: AuthoritySecret, nonce: Bytes<32>): Bytes<32> {
-    return persistentHash<Vector<6, Bytes<32>>>([pad(32, "blackout:refund:v1"), invoiceId, commitment, persistentHash<AuthoritySecret>(payerSecret), persistentHash<AuthoritySecret>(supplierSecret), nonce]);
+export pure circuit refundApprovalNullifier(invoiceId: Bytes<32>, commitment: Bytes<32>, supplierSecret: AuthoritySecret, nonce: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<5, Bytes<32>>>([pad(32, "blackout:refund:approve:v1"), invoiceId, commitment, persistentHash<AuthoritySecret>(supplierSecret), nonce]);
+}
+
+export pure circuit refundNullifier(invoiceId: Bytes<32>, commitment: Bytes<32>, payerSecret: AuthoritySecret, approvalNullifier: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<6, Bytes<32>>>([pad(32, "blackout:refund:v2"), invoiceId, commitment, persistentHash<AuthoritySecret>(payerSecret), approvalNullifier, nonce]);
 }
 
 export pure circuit receivableProofId(invoiceId: Bytes<32>, commitment: Bytes<32>, claimCode: Uint<8>, thresholdMinor: Uint<64>, nonce: Bytes<32>): Bytes<32> {
@@ -132,8 +138,12 @@ export pure circuit milestoneReleaseNullifier(milestone: Bytes<32>, commitment: 
     return persistentHash<Vector<5, Bytes<32>>>([pad(32, "blackout:milestone:release:v1"), milestone, commitment, persistentHash<AuthoritySecret>(payerSecret), nonce]);
 }
 
-export pure circuit milestoneRefundNullifier(milestone: Bytes<32>, commitment: Bytes<32>, payerSecret: AuthoritySecret, supplierSecret: AuthoritySecret, nonce: Bytes<32>): Bytes<32> {
-    return persistentHash<Vector<6, Bytes<32>>>([pad(32, "blackout:milestone:refund:v1"), milestone, commitment, persistentHash<AuthoritySecret>(payerSecret), persistentHash<AuthoritySecret>(supplierSecret), nonce]);
+export pure circuit milestoneRefundApprovalNullifier(milestone: Bytes<32>, commitment: Bytes<32>, supplierSecret: AuthoritySecret, nonce: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<5, Bytes<32>>>([pad(32, "blackout:milestone:refund:approve:v1"), milestone, commitment, persistentHash<AuthoritySecret>(supplierSecret), nonce]);
+}
+
+export pure circuit milestoneRefundNullifier(milestone: Bytes<32>, commitment: Bytes<32>, payerSecret: AuthoritySecret, approvalNullifier: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
+    return persistentHash<Vector<6, Bytes<32>>>([pad(32, "blackout:milestone:refund:v2"), milestone, commitment, persistentHash<AuthoritySecret>(payerSecret), approvalNullifier, nonce]);
 }
 
 export pure circuit amountDisclosureCommitment(amountMinor: Uint<64>, opening: Bytes<32>): Bytes<32> {
@@ -218,7 +228,7 @@ export circuit createInvoice(invoiceId: Bytes<32>, tokenColor: Bytes<32>): [] {
     assert(record.supplierCoinPublicKey != default<Bytes<32>>, "Supplier payout key must not be empty");
     assert(record.dueAt > 0, "Invoice due date must be greater than zero");
     const commitment = invoiceCommitment(invoiceId, record.amountMinor, record.taxMinor, record.payerPublicKey, record.supplierPublicKey, record.payerCoinPublicKey, record.supplierCoinPublicKey, record.dueAt, record.salt);
-    invoices.insert(id, disclose(InvoiceEntry { commitment: commitment, tokenColor: tokenColor, status: InvoiceStatus.Created, acceptanceNullifier: default<Bytes<32>>, paymentNullifier: default<Bytes<32>>, cancellationNullifier: default<Bytes<32>>, refundNullifier: default<Bytes<32>> }));
+    invoices.insert(id, disclose(InvoiceEntry { commitment: commitment, tokenColor: tokenColor, status: InvoiceStatus.Created, acceptanceNullifier: default<Bytes<32>>, paymentNullifier: default<Bytes<32>>, cancellationNullifier: default<Bytes<32>>, refundApprovalNullifier: default<Bytes<32>>, refundNullifier: default<Bytes<32>> }));
 }
 
 export circuit acceptInvoice(invoiceId: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
@@ -268,12 +278,24 @@ export circuit payInvoice(invoiceId: Bytes<32>, nonce: Bytes<32>): ShieldedCoinI
     return sent.sent;
 }
 
+export circuit approveInvoiceRefund(invoiceId: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
+    const [entry, record] = verifiedInvoice(invoiceId);
+    assert(entry.status == InvoiceStatus.Funded, "Only a funded invoice may receive refund approval");
+    assert(entry.refundApprovalNullifier == default<Bytes<32>>, "Refund is already approved");
+    const supplierSecret = assertSupplier(record);
+    const publicNullifier = disclose(refundApprovalNullifier(invoiceId, entry.commitment, supplierSecret, nonce));
+    assert(!usedNullifiers.member(publicNullifier), "Refund approval nullifier already used");
+    usedNullifiers.insert(publicNullifier, true);
+    invoices.insert(disclose(invoiceId), disclose(InvoiceEntry { ...entry, refundApprovalNullifier: publicNullifier }));
+    return publicNullifier;
+}
+
 export circuit refundInvoice(invoiceId: Bytes<32>, nonce: Bytes<32>): ShieldedCoinInfo {
     const [entry, record] = verifiedInvoice(invoiceId);
     assert(entry.status == InvoiceStatus.Funded, "Only a funded invoice may be refunded");
+    assert(entry.refundApprovalNullifier != default<Bytes<32>>, "Supplier refund approval is required");
     const payerSecret = assertPayer(record);
-    const supplierSecret = assertSupplier(record);
-    const publicNullifier = disclose(refundNullifier(invoiceId, entry.commitment, payerSecret, supplierSecret, nonce));
+    const publicNullifier = disclose(refundNullifier(invoiceId, entry.commitment, payerSecret, entry.refundApprovalNullifier, nonce));
     assert(!usedNullifiers.member(publicNullifier), "Refund nullifier already used");
     const fundedCoin = getFundedCoin();
     assert(fundedCoin.color == entry.tokenColor, "Funded coin token does not match invoice token");
@@ -321,7 +343,7 @@ export circuit registerMilestone(invoiceId: Bytes<32>, index: Uint<16>): Bytes<3
     assert(record.amountMinor > 0, "Milestone amount must be greater than zero");
     assert(record.amountMinor <= invoiceRecord.amountMinor, "Milestone amount cannot exceed invoice amount");
     const commitment = milestoneCommitment(invoiceId, index, record.amountMinor, record.salt);
-    milestones.insert(id, disclose(MilestoneEntry { invoiceId: invoiceId, index: index, commitment: commitment, tokenColor: invoiceEntry.tokenColor, status: MilestoneStatus.Registered, releaseNullifier: default<Bytes<32>>, refundNullifier: default<Bytes<32>> }));
+    milestones.insert(id, disclose(MilestoneEntry { invoiceId: invoiceId, index: index, commitment: commitment, tokenColor: invoiceEntry.tokenColor, status: MilestoneStatus.Registered, releaseNullifier: default<Bytes<32>>, refundApprovalNullifier: default<Bytes<32>>, refundNullifier: default<Bytes<32>> }));
     return id;
 }
 
@@ -354,14 +376,29 @@ export circuit releaseMilestone(invoiceId: Bytes<32>, index: Uint<16>, nonce: By
     return sent.sent;
 }
 
+export circuit approveMilestoneRefund(invoiceId: Bytes<32>, index: Uint<16>, nonce: Bytes<32>): Bytes<32> {
+    const [invoiceEntry, invoiceRecord] = verifiedInvoice(invoiceId);
+    assert(invoiceEntry.status == InvoiceStatus.Accepted, "Invoice is not available for milestone refund approval");
+    const supplierSecret = assertSupplier(invoiceRecord);
+    const [id, entry, record] = verifiedMilestone(invoiceId, index);
+    assert(record.amountMinor > 0, "Private milestone witness is invalid");
+    assert(entry.status == MilestoneStatus.Funded, "Milestone is not funded");
+    assert(entry.refundApprovalNullifier == default<Bytes<32>>, "Milestone refund is already approved");
+    const publicNullifier = disclose(milestoneRefundApprovalNullifier(id, entry.commitment, supplierSecret, nonce));
+    assert(!usedNullifiers.member(publicNullifier), "Milestone refund approval nullifier already used");
+    usedNullifiers.insert(publicNullifier, true);
+    milestones.insert(id, disclose(MilestoneEntry { ...entry, refundApprovalNullifier: publicNullifier }));
+    return publicNullifier;
+}
+
 export circuit refundMilestone(invoiceId: Bytes<32>, index: Uint<16>, nonce: Bytes<32>): ShieldedCoinInfo {
     const [invoiceEntry, invoiceRecord] = verifiedInvoice(invoiceId);
     assert(invoiceEntry.status == InvoiceStatus.Accepted, "Invoice is not available for milestone refund");
     const payerSecret = assertPayer(invoiceRecord);
-    const supplierSecret = assertSupplier(invoiceRecord);
     const [id, entry, record] = verifiedMilestone(invoiceId, index);
     assert(entry.status == MilestoneStatus.Funded, "Milestone is not funded");
-    const publicNullifier = disclose(milestoneRefundNullifier(id, entry.commitment, payerSecret, supplierSecret, nonce));
+    assert(entry.refundApprovalNullifier != default<Bytes<32>>, "Supplier milestone refund approval is required");
+    const publicNullifier = disclose(milestoneRefundNullifier(id, entry.commitment, payerSecret, entry.refundApprovalNullifier, nonce));
     assert(!usedNullifiers.member(publicNullifier), "Milestone refund nullifier already used");
     const fundedCoin = getFundedMilestoneCoin();
     assert(fundedCoin.color == entry.tokenColor, "Milestone coin token mismatch");
