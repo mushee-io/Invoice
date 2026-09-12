@@ -139,7 +139,7 @@ export pure circuit milestoneReleaseNullifier(milestone: Bytes<32>, commitment: 
 }
 
 export pure circuit milestoneRefundApprovalNullifier(milestone: Bytes<32>, commitment: Bytes<32>, supplierSecret: AuthoritySecret, nonce: Bytes<32>): Bytes<32> {
-    return persistentHash<Vector<5, Bytes<32>>>([pad(32, "blackout:milestone:refund:approve:v1"), milestone, commitment, persistentHash<AuthoritySecret>(supplierSecret), nonce]);
+    return persistentHash<Vector<5, Bytes<32>>>([pad(32, "bo:ms:refund:approve:v1"), milestone, commitment, persistentHash<AuthoritySecret>(supplierSecret), nonce]);
 }
 
 export pure circuit milestoneRefundNullifier(milestone: Bytes<32>, commitment: Bytes<32>, payerSecret: AuthoritySecret, approvalNullifier: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
