@@ -1,0 +1,9 @@
+.next/
+node_modules/
+.env
+.env.local
+contract/build/
+src/generated/
+public/invoice/keys/
+public/invoice/zkir/
+public/invoice/compact/
