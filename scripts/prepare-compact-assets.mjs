@@ -1,9 +1,9 @@
 import { cp, mkdir, rm, stat } from "node:fs/promises";
 const root = "contract/build", generated = "src/generated/invoice", publicRoot = "public/invoice";
 const circuits = [
-  "createInvoice", "acceptInvoice", "cancelInvoice", "fundInvoice", "payInvoice", "refundInvoice",
+  "createInvoice", "acceptInvoice", "cancelInvoice", "fundInvoice", "payInvoice", "approveInvoiceRefund", "refundInvoice",
   "proveInvoiceExists", "proveInvoiceAccepted", "proveInvoicePaid", "proveAmountAtLeast",
-  "registerMilestone", "fundMilestone", "releaseMilestone", "refundMilestone",
+  "registerMilestone", "fundMilestone", "releaseMilestone", "approveMilestoneRefund", "refundMilestone",
   "createAmountDisclosure", "createTaxDisclosure", "createDueDateDisclosure", "revokeDisclosure",
   "createReceipt",
 ];
