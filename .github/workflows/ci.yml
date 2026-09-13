@@ -23,8 +23,8 @@ jobs:
         run: node scripts/check-dependency-pins.mjs
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Critical dependency audit
-        run: npm audit --omit=dev --audit-level=critical
+      - name: High severity dependency audit
+        run: npm audit --omit=dev --audit-level=high
       - name: Typecheck and adversarial unit tests
         run: npm run check
       - name: Compact + Next production build
