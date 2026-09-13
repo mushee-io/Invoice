@@ -11,7 +11,7 @@
     "build:live": "bash scripts/compile-compact.sh && npm run compact:assets && npm run build:next",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/invoice/*.test.ts",
+    "test": "tsx --test src/lib/invoice/*.test.ts src/lib/institutional/*.test.ts",
     "security:pins": "node scripts/check-dependency-pins.mjs",
     "compact:compile": "compact compile contract/invoice.compact contract/build",
     "compact:assets": "node scripts/prepare-compact-assets.mjs",
