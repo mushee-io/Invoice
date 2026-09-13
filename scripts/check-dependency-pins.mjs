@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-const sections = ["dependencies", "devDependencies"];
+const sections = ["dependencies", "devDependencies", "overrides"];
 const forbidden = /^(?:\^|~|>|<|=|\*|latest$|next$|beta$|alpha$|canary$|git\+|https?:|file:|workspace:)/i;
 const semver = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const failures = [];
@@ -19,4 +19,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("All runtime and development dependencies are pinned to exact versions.");
+console.log("All runtime, development and override dependencies are pinned to exact versions.");
