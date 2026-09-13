@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: "17 4 * * 1"
 
+concurrency:
+  group: blackout-invoice-codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
